@@ -9,3 +9,9 @@ variable "name" {
   type        = string
   default     = "vladimir-faile"
 }
+
+variable "cluster_version" {
+  description = "EKS Kubernetes version."
+  type        = string
+  default     = "1.34"
+}
