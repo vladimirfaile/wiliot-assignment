@@ -15,3 +15,9 @@ variable "cluster_version" {
   type        = string
   default     = "1.34"
 }
+
+variable "kafka_version" {
+  description = "MSK Kafka version."
+  type        = string
+  default     = "3.8.x"
+}
