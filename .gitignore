@@ -19,3 +19,4 @@ kubeconfig*
 .idea/
 .vscode/
 __pycache__/
+k8s/debug/nettools.yaml

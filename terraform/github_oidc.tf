@@ -33,7 +33,7 @@ resource "aws_iam_role" "github_actions" {
       Condition = {
         StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
         # Only workflows from this repository can assume the role.
-        StringLike = { "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:*" }
+        StringLike = { "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:ref:refs/heads/*" }
       }
     }]
   })
