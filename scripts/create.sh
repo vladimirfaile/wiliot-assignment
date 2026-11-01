@@ -78,7 +78,7 @@ YAML
 }
 
 deploy_app producer
-# deploy_app consumer   # enabled once the consumer exists
+deploy_app consumer
 
 log "done"
 kubectl -n "$NAMESPACE" get deploy,pods -o wide

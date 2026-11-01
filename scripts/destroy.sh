@@ -32,6 +32,7 @@ if [[ -n "$CLUSTER" ]] && aws eks update-kubeconfig --name "$CLUSTER" --region "
    && kubectl get ns >/dev/null 2>&1; then
   log "removing app workloads and AWS-backed Kubernetes objects"
   kubectl delete -k "$ROOT/k8s/producer" --ignore-not-found --wait=true || warn "producer delete failed"
+  kubectl delete -k "$ROOT/k8s/consumer" --ignore-not-found --wait=true || warn "consumer delete failed"
   kubectl delete -f "$ROOT/k8s/debug/nettools.yaml" --ignore-not-found || true
   kubectl get svc -A -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' \
     | while read -r ns name; do [[ -n "$name" ]] && kubectl -n "$ns" delete svc "$name" --wait=true; done

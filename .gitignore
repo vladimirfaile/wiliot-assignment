@@ -20,3 +20,4 @@ kubeconfig*
 .vscode/
 __pycache__/
 k8s/debug/nettools.yaml
+k8s/debug/kafka.yaml

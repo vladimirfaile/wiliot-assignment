@@ -1,0 +1,10 @@
+# Node drains/upgrades may evict only one consumer at a time.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: consumer
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: consumer

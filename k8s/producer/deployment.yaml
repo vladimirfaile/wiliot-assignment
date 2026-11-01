@@ -32,6 +32,20 @@ spec:
       serviceAccountName: producer
       nodeSelector:
         workload: apps
+      # Node failure: by default a pod stays bound to a NotReady/unreachable node
+      # for 300s before eviction (~6 min gap with ~45s detection + startup).
+      # 30s brings that to ~1.5 min. Flapping risk is acceptable: a pod that
+      # was still alive would only stream in parallel briefly, and the consumer
+      # drops the duplicate trades.
+      tolerations:
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
       # Covers producer.flush(30) on SIGTERM.
       terminationGracePeriodSeconds: 45
       securityContext:

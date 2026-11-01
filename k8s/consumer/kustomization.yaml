@@ -1,0 +1,13 @@
+# Consumer manifests. Image set at deploy time (see k8s/producer/kustomization.yaml).
+# consumer-config (Kafka + PG connection) and consumer-db (password) come from Terraform.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: pipeline
+resources:
+  - serviceaccount.yaml
+  - deployment.yaml
+  - pdb.yaml
+images:
+  - name: consumer
+    newName: consumer # replaced by the deploy workflow
+    newTag: 0.0.0
