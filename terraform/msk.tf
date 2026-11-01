@@ -25,12 +25,16 @@ resource "aws_msk_configuration" "this" {
   kafka_versions = [var.kafka_version]
 
   server_properties = <<-PROPS
-    # Topics are created explicitly (k8s/kafka/create-topic.yaml), never by typo.
+    # Topics are created explicitly (kafka_topic.tf), never by typo.
     auto.create.topics.enable=false
     default.replication.factor=2
     # 2 brokers: requiring 2 in-sync replicas would stop writes during a broker
     # restart/patch. 1 keeps ingesting; acks=all still waits for all *in-sync* replicas.
     min.insync.replicas=1
+    # MSK defaults this to true: an out-of-sync replica could become leader and
+    # silently drop acknowledged trades. false = pause the partition instead
+    # (producer buffers/retries), trading a little freshness for no data loss.
+    unclean.leader.election.enable=false
     log.retention.hours=24
   PROPS
 

@@ -10,6 +10,19 @@ module "eks" {
   cluster_endpoint_public_access           = true
   enable_cluster_creator_admin_permissions = true
 
+  # GitHub Actions deploys apps: edit rights in the "pipeline" namespace only.
+  access_entries = {
+    github_actions = {
+      principal_arn = aws_iam_role.github_actions.arn
+      policy_associations = {
+        pipeline_edit = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy"
+          access_scope = { type = "namespace", namespaces = ["pipeline"] }
+        }
+      }
+    }
+  }
+
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 

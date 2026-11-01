@@ -1,0 +1,124 @@
+# Build and publish the producer image on every push that touches it.
+#
+# Versioning: SemVer from git tags "producer-vX.Y.Z".
+#   - No tag yet           -> 0.0.1
+#   - Default bump         -> minor (0.1.0 -> 0.2.0)
+#   - "[major]" / "[patch]" in the head commit message overrides the bump,
+#     or pick it manually via "Run workflow".
+# The image is pushed first; the git tag is created only if the push succeeded,
+# so every tag has an image and versions are never reused (ECR tags are immutable).
+name: producer-build
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "producer/**"
+      - ".github/workflows/producer-build.yml"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        type: choice
+        options: [minor, patch, major]
+        default: minor
+
+permissions:
+  id-token: write # OIDC -> AWS role, no stored keys
+  contents: write # push the version tag
+
+# Serialize builds so two pushes can't compute the same next version.
+concurrency:
+  group: producer-build
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: vladimir-faile/producer
+  TAG_PREFIX: producer-v
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need tags + history
+
+      - name: Compute next version
+        id: version
+        env:
+          INPUT_BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          latest=$(git tag --list "${TAG_PREFIX}*" --sort=-v:refname \
+                   | grep -E "^${TAG_PREFIX}[0-9]+\.[0-9]+\.[0-9]+$" | head -n1 || true)
+
+          if [ -z "$latest" ]; then
+            next="0.0.1"; bump="initial"
+          else
+            bump="${INPUT_BUMP:-}"
+            if [ -z "$bump" ]; then
+              msg=$(git log -1 --pretty=%B)
+              case "$msg" in
+                *"[major]"*) bump=major ;;
+                *"[patch]"*) bump=patch ;;
+                *)           bump=minor ;;
+              esac
+            fi
+            IFS=. read -r major minor patch <<< "${latest#"$TAG_PREFIX"}"
+            case "$bump" in
+              major) next="$((major + 1)).0.0" ;;
+              minor) next="${major}.$((minor + 1)).0" ;;
+              patch) next="${major}.${minor}.$((patch + 1))" ;;
+            esac
+          fi
+
+          echo "Previous: ${latest:-none}  bump: $bump  next: $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: producer
+          platforms: linux/amd64 # EKS nodes are x86_64
+          push: true
+          provenance: false # single image manifest in ECR
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=producer
+          cache-to: type=gha,mode=max,scope=producer
+
+      - name: Tag release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG_PREFIX}${VERSION}" -m "producer ${VERSION}" "$GITHUB_SHA"
+          git push origin "${TAG_PREFIX}${VERSION}"
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+        run: |
+          {
+            echo "### producer ${VERSION}"
+            echo "- Image: \`${IMAGE}:${VERSION}\`"
+            echo "- Tag: \`${TAG_PREFIX}${VERSION}\`"
+            echo "- Deploy: Actions → producer-deploy → Run workflow → version \`${VERSION}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

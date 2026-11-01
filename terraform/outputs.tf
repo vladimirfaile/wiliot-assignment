@@ -14,3 +14,8 @@ output "kafka_bootstrap_brokers_tls" {
 output "ecr_repositories" {
   value = { for k, r in aws_ecr_repository.app : k => r.repository_url }
 }
+
+output "github_actions_role_arn" {
+  description = "Set as the AWS_ROLE_ARN repository variable in GitHub."
+  value       = aws_iam_role.github_actions.arn
+}

@@ -1,0 +1,15 @@
+# Producer manifests. The image is set at deploy time:
+#   kustomize edit set image producer=<ecr-repo>:<version>
+#   kubectl apply -k k8s/producer
+# Namespace and the producer-config ConfigMap (Kafka bootstrap etc.) are
+# created by Terraform, since their values come from infrastructure outputs.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: pipeline
+resources:
+  - serviceaccount.yaml
+  - deployment.yaml
+images:
+  - name: producer
+    newName: producer # replaced by the deploy workflow
+    newTag: 0.0.0

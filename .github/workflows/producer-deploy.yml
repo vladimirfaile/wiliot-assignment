@@ -1,0 +1,104 @@
+# Deploy a producer version to EKS, on demand.
+# Leave "version" empty to deploy the latest released version; enter an older
+# one to roll back. Manifests are taken from the same git tag as the image,
+# so code and manifests always match.
+name: producer-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to deploy (e.g. 0.3.0). Empty = latest."
+        type: string
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: producer-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  CLUSTER_NAME: vladimir-faile-eks
+  NAMESPACE: pipeline
+  ECR_REPOSITORY: vladimir-faile/producer
+  TAG_PREFIX: producer-v
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          v="${INPUT_VERSION#v}"
+          if [ -z "$v" ]; then
+            tag=$(git tag --list "${TAG_PREFIX}*" --sort=-v:refname \
+                  | grep -E "^${TAG_PREFIX}[0-9]+\.[0-9]+\.[0-9]+$" | head -n1 || true)
+            [ -n "$tag" ] || { echo "::error::No released versions yet"; exit 1; }
+            v="${tag#"$TAG_PREFIX"}"
+          fi
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$v' is not X.Y.Z"; exit 1; }
+          git rev-parse -q --verify "refs/tags/${TAG_PREFIX}${v}" >/dev/null \
+            || { echo "::error::Tag ${TAG_PREFIX}${v} not found"; exit 1; }
+          git checkout -q "refs/tags/${TAG_PREFIX}${v}"
+          echo "Deploying $v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Check image exists
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="$VERSION" --query 'imageDetails[0].imagePushedAt' --output text
+
+      - name: Configure kubectl
+        run: aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Apply manifests
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd k8s/producer
+          kustomize edit set image "producer=${IMAGE}"
+          kubectl apply -k .
+
+      # maxUnavailable: 0 -> if the new pod never becomes Ready, the old one
+      # keeps running; the job fails and nothing is lost.
+      - name: Wait for rollout
+        run: kubectl -n "$NAMESPACE" rollout status deploy/producer --timeout=180s
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n "$NAMESPACE" get pods -l app=producer -o wide || true
+          kubectl -n "$NAMESPACE" describe deploy/producer | tail -30 || true
+          kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp | tail -20 || true
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "### producer ${VERSION} deployed"
+            kubectl -n "$NAMESPACE" get deploy/producer -o wide | sed 's/^/    /'
+          } >> "$GITHUB_STEP_SUMMARY"

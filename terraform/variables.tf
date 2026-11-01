@@ -21,3 +21,15 @@ variable "kafka_version" {
   type        = string
   default     = "3.8.x"
 }
+
+variable "github_repo" {
+  description = "owner/name of the GitHub repo allowed to assume the CI role."
+  type        = string
+  default     = "vladimirfaile/wiliot-assignment"
+}
+
+variable "github_oidc_provider_exists" {
+  description = "Set true if the account already has the GitHub OIDC provider."
+  type        = bool
+  default     = true
+}
