@@ -28,6 +28,12 @@ variable "github_repo" {
   default     = "vladimirfaile/wiliot-assignment"
 }
 
+variable "github_repo_with_ids" {
+  description = "Repo in GitHub's immutable-ID subject form: owner@<owner_id>/name@<repo_id>."
+  type        = string
+  default     = "vladimirfaile@58983076/wiliot-assignment@1436970473"
+}
+
 variable "github_oidc_provider_exists" {
   description = "Set true if the account already has the GitHub OIDC provider."
   type        = bool

@@ -32,8 +32,17 @@ resource "aws_iam_role" "github_actions" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
-        # Only workflows from this repository can assume the role.
-        StringLike = { "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:ref:refs/heads/*" }
+        # Only workflows running on a branch of this repository can assume the role.
+        # GitHub may send the subject with immutable IDs
+        # ("repo:owner@<id>/name@<id>:..."), which also protects against a
+        # deleted-and-recreated repo with the same name; the classic
+        # name-only form is kept in case the format changes back.
+        StringLike = {
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:${var.github_repo_with_ids}:ref:refs/heads/*",
+            "repo:${var.github_repo}:ref:refs/heads/*",
+          ]
+        }
       }
     }]
   })
