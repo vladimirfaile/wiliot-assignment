@@ -19,5 +19,6 @@ kubeconfig*
 .idea/
 .vscode/
 __pycache__/
-k8s/debug/nettools.yaml
-k8s/debug/kafka.yaml
+
+# Local-only debug pods (nettools, kafka, postgres)
+k8s/debug/

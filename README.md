@@ -20,7 +20,6 @@ Binance WS ──► producer (EKS) ──► MSK topic "trades" ──► consu
 | `producer/` | Binance → Kafka service (Python) and Dockerfile |
 | `consumer/` | Kafka → PostgreSQL service (Python) and Dockerfile |
 | `k8s/producer/`, `k8s/consumer/` | Deployments (kustomize; image set at deploy time) |
-| `k8s/debug/` | Network-debug pod and persistent Kafka CLI pod |
 | `.github/workflows/` | `<app>-build` (SemVer build + push), `<app>-deploy` (on demand) for producer and consumer |
 | `scripts/` | `create.sh`, `destroy.sh` |
 
@@ -121,8 +120,13 @@ _TBD — restarts, scaling, no duplicates, freshness._
   ids are unique per symbol, not globally; several symbols' counters overlap, so
   `trade_id` alone would make `ON CONFLICT` silently discard real trades of
   another symbol. The `trade_id` column is kept exactly as specified.
-* **`maticusdt`** was migrated to POL and may never emit trades; it is kept as
-  specified and doesn't trip the producer's watchdog (any symbol's traffic counts).
+* **`maticusdt` emits no trades.** MATIC was migrated to POL; Binance reports the
+  market as halted (`exchangeInfo?symbol=MATICUSDT` → `"status": "BREAK"`, while
+  `POLUSDT` is `TRADING`), so its stream connects but stays silent and the table
+  has no `MATICUSDT` rows. It is kept as specified; it doesn't trip the
+  producer's watchdog (any symbol's traffic counts) and freshness is measured
+  on actively trading symbols. Switching to `polusdt` is a one-line change to
+  `SYMBOLS` in `terraform/apps.tf`.
 * **IAM:** `iam:CreatePolicy` is denied in the sandbox, so no customer-managed
   policies: EKS secrets use the default AWS-owned encryption (no customer KMS
   key), the CI role uses an inline policy, and MSK client auth is network-based
