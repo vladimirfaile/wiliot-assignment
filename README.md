@@ -4,8 +4,10 @@ Live Binance trades for 10 symbols are streamed over a WebSocket into Kafka (MSK
 and landed in PostgreSQL exactly once per `trade_id`. All infrastructure is
 Terraform in `us-east-2`; workloads run on EKS.
 
-> **Status:** infrastructure, producer, consumer and CI/CD are in place.
-> Freshness monitoring is in place; evidence is in progress.
+> **Status:** infrastructure, producer, consumer and CI/CD were deployed and
+> verified (trades landing in PostgreSQL). The freshness monitor/alarms and the
+> evidence script are implemented but were **not deployed or run** before sandbox
+> access ended — see [Tech debt](#tech-debt).
 
 ```
 Binance WS ──► producer (EKS) ──► MSK topic "trades" ──► consumer (EKS) ──► RDS PostgreSQL
@@ -22,7 +24,8 @@ Binance WS ──► producer (EKS) ──► MSK topic "trades" ──► consu
 | `monitor/` | Freshness prober: PostgreSQL → CloudWatch metrics (Python) |
 | `k8s/producer/`, `k8s/consumer/`, `k8s/monitor/` | Deployments (kustomize; image set at deploy time) |
 | `.github/workflows/` | `<app>-build` (SemVer build + push), `<app>-deploy` (on demand) for producer, consumer and monitor |
-| `scripts/` | `create.sh`, `destroy.sh` |
+| `scripts/` | `create.sh`, `destroy.sh`, `evidence.sh` (failure scenarios → report) |
+| `evidence/` | Evidence reports from `evidence.sh` runs |
 
 ## Deploy
 
@@ -69,6 +72,9 @@ destroy doesn't need cluster API access), then runs `terraform destroy`.
 
 ## Health check
 
+> Implemented (`monitor/`, `terraform/monitoring.tf`), **not yet deployed or
+> verified** — see [Tech debt](#tech-debt).
+
 Needs only AWS credentials for the account (no cluster access):
 
 ```bash
@@ -98,7 +104,23 @@ staleness, and a dead monitor turns into missing data, which alarms.
 
 ## Evidence
 
-_TBD — restarts, scaling, no duplicates, freshness._
+Reproduce with `./scripts/evidence.sh --with-alarm` (full reports in `evidence/`).
+Loss is measured, not assumed: Binance trade ids are consecutive per symbol, so
+in any window `max(trade_id) - min(trade_id) + 1 - count(*)` = trades that never
+reached PostgreSQL.
+
+> The scripted run was **not executed** (sandbox access ended). What was
+> observed manually during the build:
+
+| Check | Observation |
+|---|---|
+| Binance reachability from EKS | `stream.binance.com` → HTTP 451 (geo-blocked); `data-stream.binance.vision` streams trades (WebSocket test from an `apps` node) |
+| Topic | `trades`: 6 partitions, RF 2, leaders spread over both brokers, all replicas in sync |
+| Trades landing | 9 symbols with rows in `trades` (e.g. BTCUSDT 14,925, ETHUSDT 12,075 after a short run) |
+| `MATICUSDT` | 0 rows; Binance `exchangeInfo` reports `"status": "BREAK"` |
+| Consumer group | 2 replicas, partitions split (e.g. `assigned [1, 3, 5]`) via cooperative-sticky |
+| Producer stopped (scaled to 0) | all symbols' newest row aged together (~13 min) — the stall the staleness alarm is built to catch |
+| CI/CD | `producer-build`/`-deploy` and `consumer-build`/`-deploy` ran green; releases `producer-v0.1.0`, `consumer-v0.0.1` |
 
 ## Design notes
 
@@ -178,3 +200,31 @@ _TBD — restarts, scaling, no duplicates, freshness._
   the provided DynamoDB table is unused because `dynamodb_table` is deprecated.
 * **EKS API endpoint is public** (authenticated via IAM) so Terraform and kubectl
   work from a laptop and from GitHub-hosted runners.
+
+## Tech debt
+
+Known gaps, in priority order:
+
+1. **Freshness monitor and alarms not deployed/verified.** Code and Terraform are
+   written; open risk: creating the EKS Pod Identity association may require
+   `iam:PassRole`, which the sandbox may deny (fallback: grant
+   `cloudwatch:PutMetricData` to the `apps` node role).
+2. **Evidence not collected.** `scripts/evidence.sh` (restarts, kills, scaling,
+   loss check by trade-id continuity, duplicate check, alarm timing) was never run.
+3. **`create.sh` / `destroy.sh` not exercised end-to-end** on a fresh account;
+   infrastructure was applied step by step with Terraform.
+4. **Producer crash gap is not recovered.** A killed producer loses the trades
+   until its replacement connects (seconds; ~1.5 min on node failure). Fix: on
+   reconnect, backfill the gap from Binance REST (`/api/v3/historicalTrades`
+   or `aggTrades` by id), or run two active-active producers (duplicates are
+   already absorbed).
+5. **Open questions for the reviewers:** `(symbol, trade_id)` as the primary key;
+   replacing halted `MATICUSDT` with `POLUSDT`; using `binance.vision` because of
+   the 451; `iam:CreatePolicy` being denied.
+6. **Production hardening:** MSK client auth (IAM per workload), 3 brokers with
+   `min.insync.replicas=2`, Multi-AZ RDS, NAT per AZ, least-privilege DB role
+   instead of the master user, RDS-managed DB secret, PostgreSQL partitioning +
+   retention, restricting the public EKS endpoint to known CIDRs, spot/Karpenter
+   for app nodes.
+7. **CI:** the three app workflows are copies (a reusable workflow would remove
+   the duplication); no unit tests or lint/`terraform validate` step in CI.
