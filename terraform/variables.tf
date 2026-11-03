@@ -39,3 +39,9 @@ variable "github_oidc_provider_exists" {
   type        = bool
   default     = true
 }
+
+variable "alert_email" {
+  description = "Optional e-mail for pipeline alarms (empty = no notifications)."
+  type        = string
+  default     = ""
+}

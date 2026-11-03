@@ -1,0 +1,14 @@
+# Freshness monitor. Image set at deploy time (see k8s/producer/kustomization.yaml).
+# monitor-config (CloudWatch namespace) comes from Terraform; DB access reuses
+# consumer-config + consumer-db. AWS credentials: EKS Pod Identity association
+# for the freshness-monitor service account (terraform/monitoring.tf).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: pipeline
+resources:
+  - serviceaccount.yaml
+  - deployment.yaml
+images:
+  - name: monitor
+    newName: monitor # replaced by the deploy workflow
+    newTag: 0.0.0

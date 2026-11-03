@@ -23,3 +23,8 @@ output "github_actions_role_arn" {
 output "rds_endpoint" {
   value = aws_db_instance.this.address
 }
+
+output "health_command" {
+  description = "One command: pipeline-health OK = fresh data flowing; ALARM rows say which check failed and why."
+  value       = "aws cloudwatch describe-alarms --region ${var.region} --alarm-name-prefix ${var.name}-pipeline- --alarm-types CompositeAlarm MetricAlarm --query '[CompositeAlarms[].[AlarmName,StateValue,StateUpdatedTimestamp], MetricAlarms[].[AlarmName,StateValue,StateReason]][]' --output text"
+}

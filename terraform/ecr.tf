@@ -1,7 +1,7 @@
-# Container images for producer and consumer, in-region.
+# Container images for producer, consumer and freshness monitor, in-region.
 # Nodes pull via AmazonEC2ContainerRegistryReadOnly (attached by the EKS module).
 resource "aws_ecr_repository" "app" {
-  for_each = toset(["producer", "consumer"])
+  for_each = toset(["producer", "consumer", "monitor"])
 
   name                 = "${var.name}/${each.key}"
   image_tag_mutability = "IMMUTABLE" # a tag always means the same image

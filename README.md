@@ -5,7 +5,7 @@ and landed in PostgreSQL exactly once per `trade_id`. All infrastructure is
 Terraform in `us-east-2`; workloads run on EKS.
 
 > **Status:** infrastructure, producer, consumer and CI/CD are in place.
-> Freshness monitoring and evidence are in progress.
+> Freshness monitoring is in place; evidence is in progress.
 
 ```
 Binance WS ──► producer (EKS) ──► MSK topic "trades" ──► consumer (EKS) ──► RDS PostgreSQL
@@ -19,8 +19,9 @@ Binance WS ──► producer (EKS) ──► MSK topic "trades" ──► consu
 | `terraform/` | VPC, EKS, MSK, RDS, ECR, GitHub OIDC role, topic Job, namespace + app config/secrets |
 | `producer/` | Binance → Kafka service (Python) and Dockerfile |
 | `consumer/` | Kafka → PostgreSQL service (Python) and Dockerfile |
-| `k8s/producer/`, `k8s/consumer/` | Deployments (kustomize; image set at deploy time) |
-| `.github/workflows/` | `<app>-build` (SemVer build + push), `<app>-deploy` (on demand) for producer and consumer |
+| `monitor/` | Freshness prober: PostgreSQL → CloudWatch metrics (Python) |
+| `k8s/producer/`, `k8s/consumer/`, `k8s/monitor/` | Deployments (kustomize; image set at deploy time) |
+| `.github/workflows/` | `<app>-build` (SemVer build + push), `<app>-deploy` (on demand) for producer, consumer and monitor |
 | `scripts/` | `create.sh`, `destroy.sh` |
 
 ## Deploy
@@ -34,7 +35,8 @@ export AWS_PROFILE=<your-profile>
 
 The script applies Terraform in two phases (VPC + EKS first, because the
 Kubernetes provider needs a live cluster), configures `kubectl`, and deploys the
-latest released producer and consumer versions from ECR.
+latest released producer, consumer and monitor versions from ECR, and prints
+the health status. Optional alarm e-mails: `terraform -chdir=terraform apply -var alert_email=you@example.com`.
 
 **One-time GitHub setup (CI/CD):** after the first apply, add a repository
 variable *Settings → Secrets and variables → Actions → Variables*:
@@ -45,9 +47,9 @@ variable *Settings → Secrets and variables → Actions → Variables*:
 
 ### Releases
 
-Each app (`producer`, `consumer`) is versioned and released independently.
+Each app (`producer`, `consumer`, `monitor`) is versioned and released independently.
 
-* **Build** — every push to `master` touching `<app>/` builds an amd64 image,
+* **Build** — every push to `master` touching `<app>/` or `k8s/<app>/` builds an amd64 image,
   pushes it to ECR and tags the commit `<app>-vX.Y.Z`.
   First release `0.0.1`; default bump is **minor**; `[major]` / `[patch]` in the
   commit message overrides it (or choose it via *Run workflow*).
@@ -67,7 +69,32 @@ destroy doesn't need cluster API access), then runs `terraform destroy`.
 
 ## Health check
 
-_TBD — single command reporting data freshness against the target (step 3)._
+Needs only AWS credentials for the account (no cluster access):
+
+```bash
+aws cloudwatch describe-alarms --region us-east-2 --alarm-name-prefix vladimir-faile-pipeline- \
+  --alarm-types CompositeAlarm MetricAlarm \
+  --query '[CompositeAlarms[].[AlarmName,StateValue,StateUpdatedTimestamp], MetricAlarms[].[AlarmName,StateValue,StateReason]][]' \
+  --output text
+```
+
+`vladimir-faile-pipeline-health  OK` = trades are flowing and fresh. `ALARM` rows
+say which check failed and why. (Also: `terraform -chdir=terraform output -raw health_command`.)
+
+**Freshness target:** a trade is in PostgreSQL within **5 s** of its Binance
+trade time (p99).
+
+| Alarm | Fires when | Missing data |
+|---|---|---|
+| `…-pipeline-staleness` | newest row older than 30 s, 2 of 2 minutes | **breaching** (monitor or DB down = not fresh) |
+| `…-pipeline-latency` | p99 trade→DB latency > 5 s, 3 of 3 minutes | not breaching (no rows = staleness alarm's job) |
+| `…-pipeline-health` | either of the above (composite) | — |
+
+The `freshness-monitor` pod queries PostgreSQL every 15 s and publishes
+`StalenessSeconds`, `LatencyP99Seconds` and `RowsPerMinute` (CloudWatch namespace
+`Pipeline/Trades`). It measures at the system of record and is independent of the
+producer and consumer: a stalled component can't be trusted to report its own
+staleness, and a dead monitor turns into missing data, which alarms.
 
 ## Evidence
 

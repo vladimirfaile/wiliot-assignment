@@ -53,3 +53,15 @@ resource "kubernetes_secret_v1" "consumer_db" {
     PGPASSWORD = random_password.db.result
   }
 }
+
+resource "kubernetes_config_map_v1" "monitor" {
+  metadata {
+    name      = "monitor-config"
+    namespace = kubernetes_namespace_v1.pipeline.metadata[0].name
+  }
+
+  data = {
+    METRIC_NAMESPACE = local.metric_namespace
+    AWS_REGION       = var.region
+  }
+}

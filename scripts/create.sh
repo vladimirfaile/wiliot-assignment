@@ -79,6 +79,10 @@ YAML
 
 deploy_app producer
 deploy_app consumer
+deploy_app monitor
 
 log "done"
 kubectl -n "$NAMESPACE" get deploy,pods -o wide
+
+log "health (alarms need ~2 min of data after a fresh deploy)"
+eval "$($TF output -raw health_command)" || true

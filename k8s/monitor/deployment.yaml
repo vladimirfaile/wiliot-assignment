@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitor
+  labels:
+    app: monitor
+spec:
+  # One prober is enough: if it dies, the alarm treats missing data as breaching.
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: monitor
+  template:
+    metadata:
+      labels:
+        app: monitor
+    spec:
+      serviceAccountName: freshness-monitor
+      nodeSelector:
+        workload: apps
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: monitor
+          image: monitor
+          envFrom:
+            - configMapRef:
+                name: monitor-config
+            - configMapRef:
+                name: consumer-config # PGHOST, PGDATABASE, ...
+            - secretRef:
+                name: consumer-db # PGPASSWORD
+          ports:
+            - name: http
+              containerPort: 8000
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
